@@ -4,28 +4,24 @@ import random
 import easyocr
 from cloakbrowser import launch
 
-# 优先从环境变量获取凭据（适用于 GitHub Actions），本地运行可替换默认值
+# 优先从环境变量获取凭据（适用于 GitHub Actions）
 USERNAME = os.getenv("BOTZONE_USER", "YOUR_USERNAME")
 PASSWORD = os.getenv("BOTZONE_PASS", "YOUR_PASSWORD")
 
 
 def run_cloak_automation():
-    # 初始化 EasyOCR（支持英文与法文）
     reader = easyocr.Reader(["en", "fr"])
 
     print("[*] 正在启动 CloakBrowser 防关联隐形浏览器...")
-    # 启动 CloakBrowser 内核（启用拟人化鼠标/键盘轨迹）
     browser = launch(headless=True, humanize=True)
 
     try:
-        # 1. 创建 Context，配置录制视频尺寸
         context = browser.new_context(
             viewport={"width": 1280, "height": 800},
             record_video_dir="recordings/",
             record_video_size={"width": 1280, "height": 800},
         )
 
-        # 2. 开启 Trace 追踪功能
         context.tracing.start(screenshots=True, snapshots=True, sources=True)
         page = context.new_page()
 
@@ -33,18 +29,18 @@ def run_cloak_automation():
         page.goto("https://botzone.fr", wait_until="domcontentloaded")
         time.sleep(2)
 
-        # 3. 点击 Connexion 按钮触发登录弹窗
+        # 1. 点击 Connexion 按钮触发登录弹窗
         print("[*] 点击 Connexion 按钮...")
         page.click("button.btn.btn-ghost:has-text('Connexion')")
         time.sleep(1.5)
 
-        # 4. 填写用户名和密码
+        # 2. 填写用户名和密码（修正为正确的 ID 选择器 #loginId 与 #loginPw）
         print("[*] 填写登录凭据...")
-        page.fill("input[name='username']", USERNAME)
-        page.fill("input[name='password']", PASSWORD)
+        page.fill("#loginId", USERNAME)
+        page.fill("#loginPw", PASSWORD)
         time.sleep(1)
 
-        # 5. 截取弹窗屏幕并使用 OCR 识别复选框
+        # 3. 截取弹窗屏幕并使用 OCR 识别复选框
         print("[*] 截图并识别验证码文字位置...")
         screenshot_path = "modal_screenshot.png"
         page.screenshot(path=screenshot_path)
@@ -61,20 +57,18 @@ def run_cloak_automation():
                 target_box = bbox
                 break
 
-        # 6. CDP 底层模拟点击
+        # 4. CDP 底层模拟点击
         cdp = context.new_cdp_session(page)
 
         if target_box:
             x_min, y_min = target_box[0]
             x_max, y_max = target_box[2]
 
-            # 计算文字框左侧复选框的大致点击坐标
             click_x = max(10, int(x_min - 25))
             click_y = int((y_min + y_max) / 2)
 
             print(f"[*] 计算得到复选框点击坐标: ({click_x}, {click_y})")
 
-            # 模拟 MousePress / MouseRelease 事件
             cdp.send(
                 "Input.dispatchMouseEvent",
                 {
@@ -104,15 +98,13 @@ def run_cloak_automation():
             if captcha_frame.count() > 0:
                 captcha_frame.locator("body").click()
 
-        # 等待人机验证响应
         time.sleep(3)
 
-        # 7. 点击提交登录按钮
+        # 5. 点击提交登录按钮
         print("[*] 点击 Se connecter 按钮...")
         page.click("#loginBtn")
         time.sleep(5)
 
-        # 保存 Trace 日志
         context.tracing.stop(path="trace.zip")
         context.close()
         print("[+] 脚本执行完成，视频与轨迹已保存。")
