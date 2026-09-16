@@ -1,120 +1,106 @@
 import os
 import time
-import random
+from PIL import Image, ImageDraw
 import easyocr
 from cloakbrowser import launch
 
-# 优先从环境变量获取凭据（适用于 GitHub Actions）
 USERNAME = os.getenv("BOTZONE_USER", "YOUR_USERNAME")
 PASSWORD = os.getenv("BOTZONE_PASS", "YOUR_PASSWORD")
 
-
-def run_cloak_automation():
-    reader = easyocr.Reader(["en", "fr"])
-
-    print("[*] 正在启动 CloakBrowser 防关联隐形浏览器...")
+def debug_ocr_and_click():
+    reader = easyocr.Reader(['en', 'fr'])
     browser = launch(headless=True, humanize=True)
 
     try:
-        context = browser.new_context(
-            viewport={"width": 1280, "height": 800},
-            record_video_dir="recordings/",
-            record_video_size={"width": 1280, "height": 800},
-        )
-
-        context.tracing.start(screenshots=True, snapshots=True, sources=True)
+        context = browser.new_context(viewport={"width": 1280, "height": 800})
         page = context.new_page()
 
-        print("[*] 正在打开 Botzone 首页...")
+        print("[*] 打开页面并打开登录弹窗...")
         page.goto("https://botzone.fr", wait_until="domcontentloaded")
         time.sleep(2)
-
-        # 1. 点击 Connexion 按钮触发登录弹窗
-        print("[*] 点击 Connexion 按钮...")
         page.click("button.btn.btn-ghost:has-text('Connexion')")
         time.sleep(1.5)
 
-        # 2. 填写用户名和密码（修正为正确的 ID 选择器 #loginId 与 #loginPw）
-        print("[*] 填写登录凭据...")
+        # 填写登录凭据
         page.fill("#loginId", USERNAME)
         page.fill("#loginPw", PASSWORD)
         time.sleep(1)
 
-        # 3. 截取弹窗屏幕并使用 OCR 识别复选框
-        print("[*] 截图并识别验证码文字位置...")
+        # 截图并使用 OCR 识别
         screenshot_path = "modal_screenshot.png"
         page.screenshot(path=screenshot_path)
-
+        
         results = reader.readtext(screenshot_path)
         target_box = None
 
         for bbox, text, prob in results:
-            print(f"[OCR] 识别到的文本: '{text}' (置信度: {prob:.2f})")
-            if any(
-                kw in text.lower()
-                for kw in ["human", "verify", "robot", "turnstile", "vérifier"]
-            ):
+            if "verify you are human" in text.lower() or "verify" in text.lower():
+                print(f"[OCR] 匹配到文本: '{text}' (置信度: {prob:.2f})")
                 target_box = bbox
                 break
 
-        # 4. CDP 底层模拟点击
-        cdp = context.new_cdp_session(page)
-
         if target_box:
+            # 获取识别到的文本框四角坐标
             x_min, y_min = target_box[0]
             x_max, y_max = target_box[2]
-
-            click_x = max(10, int(x_min - 25))
+            
+            # 计算目标点击位置（假设复选框在文本左侧约 30~40 像素）
+            click_x = int(x_min - 35)
             click_y = int((y_min + y_max) / 2)
+            
+            print(f"[*] 拟点击坐标计算为: ({click_x}, {click_y})")
 
-            print(f"[*] 计算得到复选框点击坐标: ({click_x}, {click_y})")
+            # --- 可视化：在截图上绘制红色圆圈并保存 ---
+            img = Image.open(screenshot_path)
+            draw = ImageDraw.Draw(img)
+            radius = 8
+            draw.ellipse(
+                (click_x - radius, click_y - radius, click_x + radius, click_y + radius),
+                outline="red",
+                width=3
+            )
+            debug_img_path = "click_target_debug.png"
+            img.save(debug_img_path)
+            print(f"[+] 标注点击位置的调试图已保存至: {debug_img_path}")
 
-            cdp.send(
-                "Input.dispatchMouseEvent",
-                {
-                    "type": "mousePressed",
-                    "x": click_x,
-                    "y": click_y,
-                    "button": "left",
-                    "clickCount": 1,
-                },
-            )
-            time.sleep(random.uniform(0.05, 0.15))
-            cdp.send(
-                "Input.dispatchMouseReleased",
-                {
-                    "type": "mouseReleased",
-                    "x": click_x,
-                    "y": click_y,
-                    "button": "left",
-                    "clickCount": 1,
-                },
-            )
+            # --- 标准 CDP 点击事件发送 (已修复 type 参数) ---
+            cdp = context.new_cdp_session(page)
+            
+            # 移动鼠标至坐标
+            cdp.send("Input.dispatchMouseEvent", {
+                "type": "mouseMoved",
+                "x": click_x,
+                "y": click_y
+            })
+            time.sleep(0.1)
+
+            # 按下鼠标
+            cdp.send("Input.dispatchMouseEvent", {
+                "type": "mousePressed",
+                "x": click_x,
+                "y": click_y,
+                "button": "left",
+                "clickCount": 1
+            })
+            time.sleep(0.1)
+
+            # 释放鼠标 (修正 type 为 mouseReleased)
+            cdp.send("Input.dispatchMouseEvent", {
+                "type": "mouseReleased",
+                "x": click_x,
+                "y": click_y,
+                "button": "left",
+                "clickCount": 1
+            })
         else:
-            print("[!] OCR 未能准确定位文本，尝试常规 iframe 元素定位...")
-            captcha_frame = page.frame_locator(
-                "iframe[src*='challenges.cloudflare.com']"
-            ).first
-            if captcha_frame.count() > 0:
-                captcha_frame.locator("body").click()
+            print("[-] 未在截图上识别到对应的验证文本")
 
         time.sleep(3)
-
-        # 5. 点击提交登录按钮
-        print("[*] 点击 Se connecter 按钮...")
         page.click("#loginBtn")
-        time.sleep(5)
+        time.sleep(3)
 
-        context.tracing.stop(path="trace.zip")
-        context.close()
-        print("[+] 脚本执行完成，视频与轨迹已保存。")
-
-    except Exception as e:
-        print(f"[-] 运行过程中发生错误: {e}")
-        raise e
     finally:
         browser.close()
 
-
 if __name__ == "__main__":
-    run_cloak_automation()
+    debug_ocr_and_click()
