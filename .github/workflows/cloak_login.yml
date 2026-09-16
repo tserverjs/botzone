@@ -1,7 +1,8 @@
 name: CloakBrowser Botzone Login Automation
 
 on:
-  workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * *'
 
 jobs:
   run-automation:
