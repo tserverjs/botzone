@@ -1,7 +1,7 @@
 name: CloakBrowser Botzone Login Automation
 
 on:
-  workflow_dispatch: # 手动触发运行
+  workflow_dispatch:
 
 jobs:
   run-automation:
@@ -16,23 +16,28 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: 安装 Xvfb 虚拟显示与系统库
+      - name: 安装 Xvfb 虚拟显示、系统依赖及 ffmpeg/字体
         run: |
+          echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | sudo debconf-set-selections
           sudo apt-get update
-          sudo apt-get install -y xvfb libgbm-dev libasound2t64
+          sudo apt-get install -y xvfb libgbm-dev libasound2t64 ffmpeg ttf-mscorefonts-installer fontconfig
+          sudo fc-cache -f -v
 
-      - name: 安装 CloakBrowser 及相关 Python 依赖
+      - name: 安装 Python 依赖
         run: |
           python -m pip install --upgrade pip
-          # 安装 CloakBrowser 原生包、EasyOCR 和 PyTorch
           pip install cloakbrowser easyocr torch torchvision playwright
 
-      - name: 在虚拟屏幕下运行 CloakBrowser 自动化
+      - name: 安装 Playwright 所需组件 (包含 ffmpeg)
+        run: |
+          playwright install ffmpeg
+
+      - name: 运行 CloakBrowser 自动化
         env:
           BOTZONE_USER: ${{ secrets.BOTZONE_USER }}
           BOTZONE_PASS: ${{ secrets.BOTZONE_PASS }}
+          CLOAKBROWSER_SUPPRESS_FONT_WARNING: "1"  # 抑制字体警报日志
         run: |
-          # 启动虚拟图形环境运行 CloakBrowser
           xvfb-run --server-args="-screen 0 1280x800x24" python main.py
 
       - name: 上传录制的视频和轨迹报告
