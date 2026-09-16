@@ -19,7 +19,7 @@ jobs:
       - name: 安装 Xvfb 虚拟显示与系统库
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb libgbm-dev libasound2
+          sudo apt-get install -y xvfb libgbm-dev libasound2t64
 
       - name: 安装 CloakBrowser 及相关 Python 依赖
         run: |
